@@ -72,6 +72,7 @@ class MainActivity : AppCompatActivity() {
 
             //Encrypt all Images
             ImageCrypter.encryptImageList(listOfPaths)
+                .delay(1,TimeUnit.SECONDS)
                 .subscribeBy(
                     onNext = {
                         listOfEncryptedFilePaths.add(it.path)
@@ -82,9 +83,11 @@ class MainActivity : AppCompatActivity() {
                         Toast.makeText(this, "Something went wrong.", Toast.LENGTH_SHORT).show()
                     },
                     onComplete = {
-                        Toast.makeText(this, "All image files are encrypted!", Toast.LENGTH_SHORT).show()
-                        btn_decrypt.visibility = View.VISIBLE
-                        showHideProgress(false)
+                        runOnUiThread {
+                            Toast.makeText(this, "All image files are encrypted!", Toast.LENGTH_SHORT).show()
+                            btn_decrypt.visibility = View.VISIBLE
+                            showHideProgress(false)
+                        }
                     }
                 )
         }

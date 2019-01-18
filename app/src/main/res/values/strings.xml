@@ -1,0 +1,14 @@
+<resources>
+    <string name="app_name">ImageUtils Library</string>
+
+    <string-array name="list_images">
+        <item>image_1.jpg</item>
+        <item>image_2.jpg</item>
+        <item>image_3.jpg</item>
+        <item>image_4.jpg</item>
+        <item>image_5.jpg</item>
+        <item>image_6.jpg</item>
+        <item>image_7.jpg</item>
+    </string-array>
+
+</resources>

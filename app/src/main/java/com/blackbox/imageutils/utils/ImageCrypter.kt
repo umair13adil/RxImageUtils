@@ -1,5 +1,6 @@
 package com.blackbox.imageutils.utils
 
+import android.app.Activity
 import android.content.Context
 import android.graphics.drawable.Drawable
 import android.widget.ImageView
@@ -19,6 +20,7 @@ import java.io.FileOutputStream
 import java.io.IOException
 import java.security.InvalidKeyException
 import java.security.NoSuchAlgorithmException
+import java.util.concurrent.TimeUnit
 import javax.crypto.*
 import javax.crypto.spec.SecretKeySpec
 
@@ -48,42 +50,104 @@ object ImageCrypter {
      */
     fun loadImage(imageView: ImageView, path: String, context: Context) {
 
-        ImageCrypter.decryptImage(path)
+        //Load decrypted image if it exists
+        if (getDecryptedImageIfExists(path).first) {
+
+            (context as Activity).runOnUiThread {
+                loadImageIntoImageView(imageView, getDecryptedImageIfExists(path).second, context)
+            }
+
+        } else {
+
+            ImageCrypter.decryptImage(path)
                 .subscribeOn(Schedulers.io())
                 .observeOn(AndroidSchedulers.mainThread())
+                .retry(1)
                 .subscribeBy(
-                        onNext = {
+                    onNext = { decryptedFile ->
 
-                            //Clear previous image
-                            GlideApp.with(context).clear(imageView)
+                        //Load image with delay
+                        Observable.timer(500, TimeUnit.MILLISECONDS)
+                            .doOnNext {
+                                (context as Activity).runOnUiThread {
+                                    loadImageIntoImageView(imageView, decryptedFile.path, context)
+                                }
+                            }.doOnError {
+                                it.printStackTrace()
+                            }.subscribe()
 
-                            //Load image
-                            GlideApp.with(context)
-                                    .load(it)
-                                    .apply(
-                                            RequestOptions
-                                                    .skipMemoryCacheOf(true)
-                                                    .diskCacheStrategy(DiskCacheStrategy.NONE)
-                                                    .skipMemoryCache(true)
-                                    )
-                                    .listener(object : RequestListener<Drawable> {
-                                        override fun onLoadFailed(e: GlideException?, model: Any?, target: Target<Drawable>?, isFirstResource: Boolean): Boolean {
-                                            e?.printStackTrace()
-                                            return false
-                                        }
-
-                                        override fun onResourceReady(resource: Drawable?, model: Any?, target: Target<Drawable>?, dataSource: DataSource?, isFirstResource: Boolean): Boolean {
-                                            deleteFile(it.path)
-                                            return false
-                                        }
-                                    })
-                                    .into(imageView)
-
-                        },
-                        onError = {
-                            it.printStackTrace()
-                        }
+                    },
+                    onError = {
+                    }
                 )
+        }
+    }
+
+    private fun loadImageIntoImageView(
+        imageView: ImageView,
+        path: String,
+        context: Context
+    ) {
+
+        //Load image
+        GlideApp.with(context)
+            .load(path)
+            .apply(
+                RequestOptions
+                    .skipMemoryCacheOf(true)
+                    .diskCacheStrategy(DiskCacheStrategy.NONE)
+                    .skipMemoryCache(true)
+            )
+            .listener(object : RequestListener<Drawable> {
+                override fun onLoadFailed(
+                    e: GlideException?,
+                    model: Any?,
+                    target: Target<Drawable>?,
+                    isFirstResource: Boolean
+                ): Boolean {
+
+                    e?.printStackTrace()
+                    return false
+                }
+
+                override fun onResourceReady(
+                    resource: Drawable?,
+                    model: Any?,
+                    target: Target<Drawable>?,
+                    dataSource: DataSource?,
+                    isFirstResource: Boolean
+                ): Boolean {
+
+                    //Delete file after delay
+                    deleteFileAfterView(path)
+
+                    return false
+                }
+            })
+            .into(imageView)
+    }
+
+    //Keep image for 5 seconds
+    private fun deleteFileAfterView(path: String) {
+        Observable.timer(5, TimeUnit.SECONDS)
+            .doOnNext {
+                deleteFile(path)
+            }.doOnError {
+                it.printStackTrace()
+            }.subscribe()
+    }
+
+    fun getDecryptedImageIfExists(originalFilePath: String): Pair<Boolean, String> {
+
+        val filePath = ImageCrypter.getImageParentPath(originalFilePath)
+        val imageName = ImageCrypter.getImageNameFromPath(originalFilePath)
+        val file = File(filePath, "$TEMP_IMAGE_TAG$imageName")
+
+        return if (file.exists()) {
+            Pair(true, file.path)
+        } else {
+            Pair(false, file.path)
+        }
     }
 
     /**
@@ -298,30 +362,30 @@ object ImageCrypter {
             val listOfDecryptedFiles = arrayListOf<File>()
 
             Observable.just(lisOfEncryptedFiles)
-                    .flatMapIterable { it -> it }
-                    .flatMap {
-                        decryptImage(it)
+                .flatMapIterable { it -> it }
+                .flatMap {
+                    decryptImage(it)
+                }
+                .subscribeBy(
+                    onNext = {
+                        listOfDecryptedFiles.add(it)
+                    },
+                    onError = {
+                        it.printStackTrace()
+
+                        if (!emitter.isDisposed) {
+                            emitter.onError(it)
+                            emitter.onComplete()
+                        }
+                    },
+                    onComplete = {
+
+                        if (!emitter.isDisposed) {
+                            emitter.onNext(listOfDecryptedFiles)
+                            emitter.onComplete()
+                        }
                     }
-                    .subscribeBy(
-                            onNext = {
-                                listOfDecryptedFiles.add(it)
-                            },
-                            onError = {
-                                it.printStackTrace()
-
-                                if (!emitter.isDisposed) {
-                                    emitter.onError(it)
-                                    emitter.onComplete()
-                                }
-                            },
-                            onComplete = {
-
-                                if (!emitter.isDisposed) {
-                                    emitter.onNext(listOfDecryptedFiles)
-                                    emitter.onComplete()
-                                }
-                            }
-                    )
+                )
         }
     }
 
@@ -351,7 +415,7 @@ object ImageCrypter {
         //Create a copy of original file
         try {
             FileUtils.copy(originalFile, copyFile)
-        }catch(ex : IOException){
+        } catch (ex: IOException) {
             ex.printStackTrace()
         }
 
